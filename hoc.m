@@ -11,9 +11,9 @@ classdef hoc < handle
         dataPath;
         FC;
         lbls;
-        log;
         nROIs;
         feats;
+        tripletIdx;
     end
     
     methods
@@ -43,27 +43,20 @@ classdef hoc < handle
                 inData.cm_all_subj_corr=inData.cm_all_subj_corr(union(inData.idHC,inData.idRR));
                 this.FC=inData.cm_all_subj_corr;
             end
-%             
-%             % Convert all covariance matrices into correlation matrices
-%             for currSubj=1:length(this.FC)
-%                 for currSlice=1:size(this.FC{currSubj},3)
-%                     D=sqrt(diag(diag(squeeze(this.FC{currSubj}(:,:,currSlice)))));
-%                     Dinv=pinv(D);
-%                     this.FC{currSubj}(:,:,currSlice)=Dinv*this.FC{currSubj}(:,:,currSlice)*Dinv;
-%                 end
-%             end
         end
         
         function computeOutlyingConnections(this)
-            for currSubj=1:length(this.lbls)
-                this.log{currSubj}=[];
-                
+            % Initialize large variables
+            this.tripletIdx=zeros(this.nROIs^3,length(this.lbls),3);
+            this.feats=zeros(this.nROIs^3,length(this.lbls));
+            
+            for currSubj=1:length(this.lbls)                
                 % Compute three-way coactivations for current subject
-                sData=abs(this.FC{currSubj});
+                sData=this.FC{currSubj};
                 sa=repmat(permute(sData,[4 1 2 3]),this.nROIs,1,1,1);
                 sb=repmat(permute(sData,[1 4 2 3]),1,this.nROIs,1,1);
                 sc=repmat(permute(sData,[1 2 4 3]),1,1,this.nROIs,1);
-                sHOC=sa.*sb.*sc;
+                sHOC=sa.*sb.*sc.*(sa>0).*(sb>0).*(sc>0);
                 
                 % Compute 'sham' three-way coactivations to determine
                 % threshold
@@ -71,9 +64,8 @@ classdef hoc < handle
                 sa=repmat(permute(shamData,[4 1 2 3]),this.nROIs,1,1,1);
                 sb=repmat(permute(shamData,[1 4 2 3]),1,this.nROIs,1,1);
                 sc=repmat(permute(shamData,[1 2 4 3]),1,1,this.nROIs,1);
-                shamHOCavg=squeeze(mean(sa.*sb.*sc,4));
+                shamHOCavg=squeeze(mean(sa.*sb.*sc.*(sa>0).*(sb>0).*(sc>0),4));
                 th=max(reshape(shamHOCavg,[],1));
-%                 th=0.3;
                 
                 % Recover data for healthy subjects, excluding current one, if
                 % relevant
@@ -91,60 +83,38 @@ classdef hoc < handle
                 actSubs(cellfun(@(x)length(unique(x))~=3,num2cell(actSubs,2)),:)=[]; % Removing entries with dublicate coords
                 actSubs=unique(sort(actSubs,2),'rows'); % Can do this, as order is irrelevant (matrix is VERY symmetric)
                 
-%                 % Determine which connections are significant in healthy
-%                 % subject data
-%                 hMat=nan(nROIs);
-%                 for currDim1=1:nROIs
-%                     for currDim2=currDim1:nROIs
-%                         [~,hMat(currDim1,currDim2)]=signrank(squeeze(hData(currDim1,currDim2,:)),[],'tail','right','alpha',.05/((nROIs*nROIs)/2));
-%                         hMat(currDim2,currDim1)=hMat(currDim1,currDim2);
-%                     end
-%                 end
-                % Using median is an approximation, but much faster
-                hMat=squeeze(median(hData,3))>0;
+                % Determine average FC for current subject and healthy
+                % controls
+                hMat=squeeze(median(hData,3));
+                sMat=squeeze(median(sData,3));
                 
-                % For each strong 3-way coactivation, I need to test whether
-                % exactly one strong connection exists on healthy subjects
+                % For each strong triplet, save difference between
+                % strongest and second strongest connections on healthy
+                % subjects
                 for currSub=1:size(actSubs,1)
-                    hVec=[hMat(actSubs(currSub,1),actSubs(currSub,2)),hMat(actSubs(currSub,1),actSubs(currSub,3)),hMat(actSubs(currSub,2),actSubs(currSub,3))];
-                    if sum(hVec)==1 % i.e. only one connection is significantly larger than 0
-                        % I found a likely re-route. Shuffling order so
-                        % that only link in healthy subjects is always
-                        % between first two elements
-                        switch hVec*(1:3)' % Case 1 requires no changes
-                            case 2 % i.e. 1-3
-                                actSubs(currSub,:)=actSubs(currSub,[1 3 2]);
-                            case 3 % i.e. 2-3
-                                actSubs(currSub,:)=actSubs(currSub,[2 3 1]);
-                        end
-                        
-                        % I found a likely re-route, let's log it
-                        if isempty(this.log{currSubj})
-                            this.log{currSubj}=actSubs(currSub,:);
-                        else
-                            this.log{currSubj}=cat(1,this.log{currSubj},actSubs(currSub,:));
-                        end
+                    % Recover involved connection strengths for current
+                    % subject and corresponding strengths for healthy ones
+                    hVals=[hMat(actSubs(currSub,1),actSubs(currSub,2)),hMat(actSubs(currSub,1),actSubs(currSub,3)),hMat(actSubs(currSub,2),actSubs(currSub,3))];
+                    sVals=[sMat(actSubs(currSub,1),actSubs(currSub,2)),sMat(actSubs(currSub,1),actSubs(currSub,3)),sMat(actSubs(currSub,2),actSubs(currSub,3))];
+                    
+                    % Reorder indexes so that strongest connection is first
+                    switch (sVals==max(sVals))*(1:3)' % Case 1 requires no changes
+                        case 2 % i.e. 1-3
+                            actSubs(currSub,:)=actSubs(currSub,[1 3 2]);
+                        case 3 % i.e. 2-3
+                            actSubs(currSub,:)=actSubs(currSub,[2 3 1]);
                     end
+                    this.feats(actSubs(currSub,:)*90.^(2:-1:0)',currSubj)=median(sVals)-median(hVals);
+                    this.tripletIdx(actSubs(currSub,:)*90.^(2:-1:0)',currSubj,:)=actSubs(currSub,:);
                 end
                 
                 % Print progress
-                fprintf('%d/%d subj lbl: %d, # re-routes: %d\n',currSubj,length(this.lbls),this.lbls(currSubj),size(this.log{currSubj},1));
-            end
-        end
-        
-        function recoverFeatures(this)
-            % Not sure how to classify data with variable number of
-            % elements. At the moment, I will try transforming data so that
-            % I obtain a distribution of substituted and substituting links
-            % for each subject and hope that works
-            this.feats=zeros(this.nROIs^3,length(this.lbls));
-            for currSubj=1:length(this.lbls)
-                currSubjIdx=this.log{currSubj}*[this.nROIs^2,this.nROIs,1]';
-                this.feats(currSubjIdx,currSubj)=1;
+                fprintf('%d/%d subj lbl: %d, # 3-way connections: %d\n',currSubj,length(this.lbls),this.lbls(currSubj),sum(this.feats(:,currSubj)~=0));
             end
             
-            % Remove triplets that never occur
-            this.feats(sum(this.feats,2)==0,:)=[];
+            % Remove feature that are zeros for all subjects
+            this.tripletIdx=this.tripletIdx(sum(this.feats~=0,2)>0,:);
+            this.feats=this.feats(sum(this.feats~=0,2)>0,:);
         end
         
         function BAcc=testClassifier(this)
@@ -166,7 +136,7 @@ classdef hoc < handle
 %             optMethod=optimizableVariable('Method',{'Bag', 'GentleBoost', 'LogitBoost', 'RUSBoost'});
 %             optMaxSplits=optimizableVariable('MaxNumSplits',[2 100],'Type','integer');
 %             results=bayesopt(errFun,[optCycles,optLeaves,optMethod,optMaxSplits],...
-%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',100);%,'Verbose',0,'PlotFcn',{});
+%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',500);%,'Verbose',0,'PlotFcn',{});
 %                 
 %             % Train cross-validated classifier
 %             ens=fitcensemble(this.feats',this.lbls','KFold',5,'Cost',costMat,'Method',char(results.XAtMinEstimatedObjective.Method),...
@@ -176,39 +146,39 @@ classdef hoc < handle
 %             % Recover predictions
 %             lblsEst=ens.kfoldPredict;
             
-            %%  Gauss SVM
-            errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
-                predict(fitcsvm(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
-                'Cost',costMat,'BoxConstraint',x.BC,'KernelScale',x.KS,'Cost',costMat,...
-                'KernelFunction','gaussian'),this.feats(:,2:2:end)'));
-            optBC=optimizableVariable('BC',[1e-7,1e7],'Transform','log');
-            optKS=optimizableVariable('KS',[1e-3,1e3],'Transform','log');
-            results=bayesopt(errFun,[optBC,optKS],...
-                'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',100);%,'Verbose',0,'PlotFcn',{});
-            
-            % Train cross-validated classifier
-            svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','gaussian',...
-                'KernelScale',results.XAtMinEstimatedObjective.KS,...
-                'BoxConstraint',results.XAtMinEstimatedObjective.BC);
-            
-            % Recover predictions
-            lblsEst=svmMdl.kfoldPredict;            
-
-%             %%  Linear SVM (best so far)
+%             %%  Gauss SVM
 %             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
 %                 predict(fitcsvm(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
-%                 'Cost',costMat,'BoxConstraint',x.BC,'Cost',costMat,...
-%                 'KernelFunction','linear'),this.feats(:,2:2:end)'));
-%             optBC=optimizableVariable('BC',[1e-4,1e4],'Transform','log');
-%             results=bayesopt(errFun,optBC,...
+%                 'Cost',costMat,'BoxConstraint',x.BC,'KernelScale',x.KS,'Cost',costMat,...
+%                 'KernelFunction','gaussian'),this.feats(:,2:2:end)'));
+%             optBC=optimizableVariable('BC',[1e-7,1e7],'Transform','log');
+%             optKS=optimizableVariable('KS',[1e-3,1e3],'Transform','log');
+%             results=bayesopt(errFun,[optBC,optKS],...
 %                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',100);%,'Verbose',0,'PlotFcn',{});
 %             
 %             % Train cross-validated classifier
-%             svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','linear',...
+%             svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','gaussian',...
+%                 'KernelScale',results.XAtMinEstimatedObjective.KS,...
 %                 'BoxConstraint',results.XAtMinEstimatedObjective.BC);
 %             
 %             % Recover predictions
-%             lblsEst=svmMdl.kfoldPredict;
+%             lblsEst=svmMdl.kfoldPredict;            
+
+            %%  Linear SVM (best so far)
+            errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
+                predict(fitcsvm(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
+                'Cost',costMat,'BoxConstraint',x.BC,'Cost',costMat,...
+                'KernelFunction','linear'),this.feats(:,2:2:end)'));
+            optBC=optimizableVariable('BC',[1e-4,1e4],'Transform','log');
+            results=bayesopt(errFun,optBC,...
+                'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',20);%,'Verbose',0,'PlotFcn',{});
+            
+            % Train cross-validated classifier
+            svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','linear',...
+                'BoxConstraint',results.XAtMinEstimatedObjective.BC);
+            
+            % Recover predictions
+            lblsEst=svmMdl.kfoldPredict;
             
 %             %%  Naive Bayes (doesn't seem to be working at all)
 %             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
