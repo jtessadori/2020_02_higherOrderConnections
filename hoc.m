@@ -56,16 +56,10 @@ classdef hoc < handle
                 sa=repmat(permute(sData,[4 1 2 3]),this.nROIs,1,1,1);
                 sb=repmat(permute(sData,[1 4 2 3]),1,this.nROIs,1,1);
                 sc=repmat(permute(sData,[1 2 4 3]),1,1,this.nROIs,1);
-                sHOC=sa.*sb.*sc.*(sa>0).*(sb>0).*(sc>0);
+                sHOCavg=squeeze(mean(sa.*sb.*sc.*(sa>0).*(sb>0).*(sc>0),4));
                 
-                % Compute 'sham' three-way coactivations to determine
-                % threshold
-                shamData=abs(reshape(sData(randperm(numel(sData))),size(sData,1),size(sData,2),size(sData,3)));
-                sa=repmat(permute(shamData,[4 1 2 3]),this.nROIs,1,1,1);
-                sb=repmat(permute(shamData,[1 4 2 3]),1,this.nROIs,1,1);
-                sc=repmat(permute(shamData,[1 2 4 3]),1,1,this.nROIs,1);
-                shamHOCavg=squeeze(mean(sa.*sb.*sc.*(sa>0).*(sb>0).*(sc>0),4));
-                th=max(reshape(shamHOCavg,[],1));
+                % Fix threshold for "often active together" triplets
+                th=.125;
                 
                 % Recover data for healthy subjects, excluding current one, if
                 % relevant
@@ -74,7 +68,6 @@ classdef hoc < handle
                 
                 % Define average 3-way coactivations above a
                 % certain threshold as "often active together"
-                sHOCavg=squeeze(mean(sHOC,4));
                 actIdx=find(sHOCavg>th);
                 [idx1,idx2,idx3]=ind2sub(size(sHOCavg),actIdx);
                 
@@ -120,7 +113,7 @@ classdef hoc < handle
         function BAcc=testClassifier(this)
             % Recover labels proportions
             pdf=histcounts(this.lbls,length(unique(this.lbls)),'Normalization','probability');
-            costMat=[0,1/pdf(1);1/pdf(2),0];
+            costMat=[0,1/pdf(1);1/pdf(2),0]; %#ok<NASGU>
             
             % Determine best classifier structure, using half data for
             % training and half for validation (this causes some degree of
@@ -136,10 +129,10 @@ classdef hoc < handle
 %             optMethod=optimizableVariable('Method',{'Bag', 'GentleBoost', 'LogitBoost', 'RUSBoost'});
 %             optMaxSplits=optimizableVariable('MaxNumSplits',[2 100],'Type','integer');
 %             results=bayesopt(errFun,[optCycles,optLeaves,optMethod,optMaxSplits],...
-%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',500);%,'Verbose',0,'PlotFcn',{});
+%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',50);%,'Verbose',0,'PlotFcn',{});
 %                 
 %             % Train cross-validated classifier
-%             ens=fitcensemble(this.feats',this.lbls','KFold',5,'Cost',costMat,'Method',char(results.XAtMinEstimatedObjective.Method),...
+%             ens=fitcensemble(this.feats',this.lbls','KFold',2,'Cost',costMat,'Method',char(results.XAtMinEstimatedObjective.Method),...
 %                 'NumLearningCycles',results.XAtMinEstimatedObjective.nCycles,'Learners',templateTree('MaxNumSplits',...
 %                 results.XAtMinEstimatedObjective.MaxNumSplits,'MinLeafSize',results.XAtMinEstimatedObjective.nLeaves));
 %             
@@ -154,7 +147,7 @@ classdef hoc < handle
 %             optBC=optimizableVariable('BC',[1e-7,1e7],'Transform','log');
 %             optKS=optimizableVariable('KS',[1e-3,1e3],'Transform','log');
 %             results=bayesopt(errFun,[optBC,optKS],...
-%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',100);%,'Verbose',0,'PlotFcn',{});
+%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',50);%,'Verbose',0,'PlotFcn',{});
 %             
 %             % Train cross-validated classifier
 %             svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','gaussian',...
@@ -164,21 +157,21 @@ classdef hoc < handle
 %             % Recover predictions
 %             lblsEst=svmMdl.kfoldPredict;            
 
-            %%  Linear SVM (best so far)
-            errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
-                predict(fitcsvm(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
-                'Cost',costMat,'BoxConstraint',x.BC,'Cost',costMat,...
-                'KernelFunction','linear'),this.feats(:,2:2:end)'));
-            optBC=optimizableVariable('BC',[1e-4,1e4],'Transform','log');
-            results=bayesopt(errFun,optBC,...
-                'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',20);%,'Verbose',0,'PlotFcn',{});
-            
-            % Train cross-validated classifier
-            svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','linear',...
-                'BoxConstraint',results.XAtMinEstimatedObjective.BC);
-            
-            % Recover predictions
-            lblsEst=svmMdl.kfoldPredict;
+%             %%  Linear SVM (best so far)
+%             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
+%                 predict(fitcsvm(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
+%                 'Cost',costMat,'BoxConstraint',x.BC,'Cost',costMat,...
+%                 'KernelFunction','linear'),this.feats(:,2:2:end)'));
+%             optBC=optimizableVariable('BC',[1e-4,1e4],'Transform','log');
+%             results=bayesopt(errFun,optBC,...
+%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',20);%,'Verbose',0,'PlotFcn',{});
+%             
+%             % Train cross-validated classifier
+%             svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','linear',...
+%                 'BoxConstraint',results.XAtMinEstimatedObjective.BC);
+%             
+%             % Recover predictions
+%             lblsEst=svmMdl.kfoldPredict;
             
 %             %%  Naive Bayes (doesn't seem to be working at all)
 %             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
@@ -213,6 +206,11 @@ classdef hoc < handle
 %             
 %             % Recover predictions
 %             lblsEst=svmMdl.kfoldPredict;
+
+            % Lasso (or elastic net, depending on Alpha parameter)
+            [B,FitInfo] = lasso(this.feats',this.lbls','CV',5,'Alpha',.5);
+            lblsEst=(this.feats'*B(:,FitInfo.Index1SE)+FitInfo.Intercept(FitInfo.Index1SE))>.5;
+%             [X,Y,T,AUC]=perfcurve(hocMid.lbls,lassoEst,1);
             
             % Compute balanced accuracy
             BAcc=BAccFun(this.lbls,lblsEst);
