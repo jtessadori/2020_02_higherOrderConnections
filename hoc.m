@@ -14,6 +14,8 @@ classdef hoc < handle
         nROIs;
         feats;
         tripletIdx;
+        B;
+        FitInfo;
     end
     
     methods
@@ -78,6 +80,10 @@ classdef hoc < handle
                 
                 % Determine average FC for current subject and healthy
                 % controls
+%                 hCell=squeeze(num2cell(hData,[1 2]));
+%                 sCell=squeeze(num2cell(sData,[1 2]));
+%                 hMat=karcher(hCell{:});
+%                 sMat=karcher(sCell{:});
                 hMat=squeeze(median(hData,3));
                 sMat=squeeze(median(sData,3));
                 
@@ -119,6 +125,8 @@ classdef hoc < handle
             % training and half for validation (this causes some degree of
             % double dipping with the next step)
             BAccFun=@(Yreal,Yest)((sum((Yreal==0).*(Yest==0))/sum(Yreal==0))+(sum((Yreal==1).*(Yest==1))/sum(Yreal==1)))/2;
+            
+            
 %             %% Random forest (or is it?)
 %             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
 %                 predict(fitcensemble(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
@@ -208,9 +216,10 @@ classdef hoc < handle
 %             lblsEst=svmMdl.kfoldPredict;
 
             % Lasso (or elastic net, depending on Alpha parameter)
-            [B,FitInfo] = lasso(this.feats',this.lbls','CV',5,'Alpha',.5);
-            lblsEst=(this.feats'*B(:,FitInfo.Index1SE)+FitInfo.Intercept(FitInfo.Index1SE))>.5;
-%             [X,Y,T,AUC]=perfcurve(hocMid.lbls,lassoEst,1);
+            [this.B,this.FitInfo] = lasso(this.feats',this.lbls','CV',5,'Alpha',.5);
+            lassoScore=this.feats'*this.B(:,this.FitInfo.Index1SE)+this.FitInfo.Intercept(this.FitInfo.Index1SE);
+            lblsEst=lassoScore>.5;
+%             [X,Y,T,AUC]=perfcurve(this.lbls,lassoScore,1);
             
             % Compute balanced accuracy
             BAcc=BAccFun(this.lbls,lblsEst);
