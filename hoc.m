@@ -14,8 +14,6 @@ classdef hoc < handle
         nROIs;
         feats;
         tripletIdx;
-        B;
-        FitInfo;
     end
     
     methods
@@ -112,26 +110,30 @@ classdef hoc < handle
             end
             
             % Remove feature that are zeros for all subjects
-            this.tripletIdx=this.tripletIdx(sum(this.feats~=0,2)>0,:);
+            this.tripletIdx=this.tripletIdx(sum(this.feats~=0,2)>0,:,:);
             this.feats=this.feats(sum(this.feats~=0,2)>0,:);
         end
         
         function BAcc=testClassifier(this)
             % Recover labels proportions
             pdf=histcounts(this.lbls,length(unique(this.lbls)),'Normalization','probability');
-            costMat=[0,1/pdf(1);1/pdf(2),0]; %#ok<NASGU>
+            costMat=[0,1/pdf(1);1/pdf(2),0];
+            
+%             % Lasso (or elastic net, depending on Alpha parameter)
+%             if isempty(this.B) % Skip lasso if it has already been performed here
+%                 [this.B,this.FitInfo] = lassoglm(this.feats',this.lbls,'binomial','CV',5,'Alpha',.5,'link','logit');
+%             end
             
             % Determine best classifier structure, using half data for
             % training and half for validation (this causes some degree of
             % double dipping with the next step)
             BAccFun=@(Yreal,Yest)((sum((Yreal==0).*(Yest==0))/sum(Yreal==0))+(sum((Yreal==1).*(Yest==1))/sum(Yreal==1)))/2;
             
-            
 %             %% Random forest (or is it?)
 %             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
-%                 predict(fitcensemble(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
+%                 predict(fitcensemble(this.feats(featsIdx,1:2:end)',this.lbls(1:2:end)',...
 %                 'Cost',costMat,'NumLearningCycles',x.nCycles,'Method',char(x.Method),'Cost',costMat,...
-%                 'Learners',templateTree('MaxNumSplits',x.MaxNumSplits,'MinLeafSize',x.nLeaves)),this.feats(:,2:2:end)'));
+%                 'Learners',templateTree('MaxNumSplits',x.MaxNumSplits,'MinLeafSize',x.nLeaves)),this.feats(featsIdx,2:2:end)'));
 %             optCycles=optimizableVariable('nCycles',[20 500],'Type','integer');
 %             optLeaves=optimizableVariable('nLeaves',[1 100],'Type','integer');
 %             optMethod=optimizableVariable('Method',{'Bag', 'GentleBoost', 'LogitBoost', 'RUSBoost'});
@@ -140,7 +142,7 @@ classdef hoc < handle
 %                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',50);%,'Verbose',0,'PlotFcn',{});
 %                 
 %             % Train cross-validated classifier
-%             ens=fitcensemble(this.feats',this.lbls','KFold',2,'Cost',costMat,'Method',char(results.XAtMinEstimatedObjective.Method),...
+%             ens=fitcensemble(this.feats(featsIdx,:)',this.lbls','KFold',2,'Cost',costMat,'Method',char(results.XAtMinEstimatedObjective.Method),...
 %                 'NumLearningCycles',results.XAtMinEstimatedObjective.nCycles,'Learners',templateTree('MaxNumSplits',...
 %                 results.XAtMinEstimatedObjective.MaxNumSplits,'MinLeafSize',results.XAtMinEstimatedObjective.nLeaves));
 %             
@@ -149,49 +151,49 @@ classdef hoc < handle
             
 %             %%  Gauss SVM
 %             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
-%                 predict(fitcsvm(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
+%                 predict(fitcsvm(this.feats(featsIdx,1:2:end)',this.lbls(1:2:end)',...
 %                 'Cost',costMat,'BoxConstraint',x.BC,'KernelScale',x.KS,'Cost',costMat,...
-%                 'KernelFunction','gaussian'),this.feats(:,2:2:end)'));
+%                 'KernelFunction','gaussian'),this.feats(featsIdx,2:2:end)'));
 %             optBC=optimizableVariable('BC',[1e-7,1e7],'Transform','log');
 %             optKS=optimizableVariable('KS',[1e-3,1e3],'Transform','log');
 %             results=bayesopt(errFun,[optBC,optKS],...
 %                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',50);%,'Verbose',0,'PlotFcn',{});
 %             
 %             % Train cross-validated classifier
-%             svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','gaussian',...
+%             svmMdl=fitcsvm(this.feats(featsIdx,:)',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','gaussian',...
 %                 'KernelScale',results.XAtMinEstimatedObjective.KS,...
 %                 'BoxConstraint',results.XAtMinEstimatedObjective.BC);
 %             
 %             % Recover predictions
-%             lblsEst=svmMdl.kfoldPredict;            
+%             lblsEst=svmMdl.kfoldPredict;
 
 %             %%  Linear SVM (best so far)
 %             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
-%                 predict(fitcsvm(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
+%                 predict(fitcsvm(this.feats(featsIdx,1:2:end)',this.lbls(1:2:end)',...
 %                 'Cost',costMat,'BoxConstraint',x.BC,'Cost',costMat,...
-%                 'KernelFunction','linear'),this.feats(:,2:2:end)'));
-%             optBC=optimizableVariable('BC',[1e-4,1e4],'Transform','log');
+%                 'KernelFunction','linear'),this.feats(featsIdx,2:2:end)'));
+%             optBC=optimizableVariable('BC',[1e-7,1e7],'Transform','log');
 %             results=bayesopt(errFun,optBC,...
 %                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',20);%,'Verbose',0,'PlotFcn',{});
 %             
 %             % Train cross-validated classifier
-%             svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','linear',...
+%             svmMdl=fitcsvm(this.feats(featsIdx,:)',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','linear',...
 %                 'BoxConstraint',results.XAtMinEstimatedObjective.BC);
 %             
 %             % Recover predictions
 %             lblsEst=svmMdl.kfoldPredict;
             
-%             %%  Naive Bayes (doesn't seem to be working at all)
+%             %%  Naive Bayes
 %             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
-%                 predict(fitcnb(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
+%                 predict(fitcnb(this.feats(featsIdx,1:2:end)',this.lbls(1:2:end)',...
 %                 'Cost',costMat,'Width',x.K,'Cost',costMat,...
-%                 'DistributionNames','kernel'),this.feats(:,2:2:end)'));
+%                 'DistributionNames','kernel'),this.feats(featsIdx,2:2:end)'));
 %             optK=optimizableVariable('K',[1e-4,1e4],'Transform','log');
 %             results=bayesopt(errFun,optK,...
-%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',100);%,'Verbose',0,'PlotFcn',{});
+%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',30);%,'Verbose',0,'PlotFcn',{});
 %             
 %             % Train cross-validated classifier
-%             nbMdl=fitcnb(this.feats',this.lbls','KFold',5,'Cost',costMat,'DistributionNames','kernel',...
+%             nbMdl=fitcnb(this.feats(featsIdx,:)',this.lbls','KFold',5,'Cost',costMat,'DistributionNames','kernel',...
 %                 'Width',results.XAtMinEstimatedObjective.K);
 %             
 %             % Recover predictions
@@ -199,27 +201,73 @@ classdef hoc < handle
             
 %             %% Poly-SVM
 %             errFun=@(x)1-BAccFun(this.lbls(2:2:end),...
-%                 predict(fitcsvm(this.feats(:,1:2:end)',this.lbls(1:2:end)',...
+%                 predict(fitcsvm(this.feats(featsIdx,1:2:end)',this.lbls(1:2:end)',...
 %                 'Cost',costMat,'BoxConstraint',x.BC,'Cost',costMat,...
-%                 'PolynomialOrder',x.PO,'KernelFunction','polynomial'),this.feats(:,2:2:end)'));
+%                 'PolynomialOrder',x.PO,'KernelFunction','polynomial'),this.feats(featsIdx,2:2:end)'));
 %             optBC=optimizableVariable('BC',[1e-4,1e4],'Transform','log');
 %             optPO=optimizableVariable('PO',[2 4],'Type','integer');
 %             results=bayesopt(errFun,[optBC,optPO],...
-%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',100);%,'Verbose',0,'PlotFcn',{});
+%                 'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',50);%,'Verbose',0,'PlotFcn',{});
 %             
 %             % Train cross-validated classifier
-%             svmMdl=fitcsvm(this.feats',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','polynomial',...
+%             svmMdl=fitcsvm(this.feats(featsIdx,:)',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','polynomial',...
 %                 'BoxConstraint',results.XAtMinEstimatedObjective.BC,...
 %                 'PolynomialOrder',results.XAtMinEstimatedObjective.PO);
 %             
 %             % Recover predictions
 %             lblsEst=svmMdl.kfoldPredict;
+% 
+%             % Train cross-validated classifier
+%             svmMdl=fitcsvm(this.feats(featsIdx,:)',this.lbls','KFold',5,'Cost',costMat,'KernelFunction','polynomial',...
+%                 'BoxConstraint',50,...
+%                 'PolynomialOrder',2);
+%             
+%             % Recover predictions
+%             lblsEst=svmMdl.kfoldPredict;
+            
+            % Train cross-validated classifier
+            C=cvpartition(length(this.lbls),'kfold',5);
+            lblsEst=zeros(size(this.lbls));
+            for currPart=1:C.NumTestSets
+                % Recover train and test sets
+                trainData=this.feats(:,C.training(currPart));
+                trainLbls=this.lbls(C.training(currPart));
+                testData=this.feats(:,C.test(currPart));
+                
+                % Ignore "bad" features
+                featsIdx=fisherScore(trainData',trainLbls)>.25;
+                
+%                 %%  Gauss SVM
+%                 errFun=@(x)1-BAccFun(trainLbls(2:2:end),...
+%                     predict(fitcsvm(trainData(featsIdx,1:2:end)',trainLbls(1:2:end)',...
+%                     'Cost',costMat,'BoxConstraint',x.BC,'KernelScale',x.KS,'Cost',costMat,...
+%                     'KernelFunction','gaussian'),trainData(featsIdx,2:2:end)'));
+%                 optBC=optimizableVariable('BC',[1e-7,1e7],'Transform','log');
+%                 optKS=optimizableVariable('KS',[1e-3,1e3],'Transform','log');
+%                 results=bayesopt(errFun,[optBC,optKS],...
+%                     'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',25);%,'Verbose',0,'PlotFcn',{});
+%                 
+%                 % Train cross-validated classifier
+%                 svmMdl=fitcsvm(trainData(featsIdx,:)',trainLbls,'Cost',costMat,'KernelFunction','gaussian',...
+%                     'KernelScale',results.XAtMinEstimatedObjective.KS,...
+%                     'BoxConstraint',results.XAtMinEstimatedObjective.BC);
+                
+                %%  Linear SVM (best so far)
+                errFun=@(x)1-BAccFun(trainLbls(2:2:end),...
+                    predict(fitcsvm(trainData(featsIdx,1:2:end)',trainLbls(1:2:end)',...
+                    'Cost',costMat,'BoxConstraint',x.BC,'Cost',costMat,...
+                    'KernelFunction','linear'),trainData(featsIdx,2:2:end)'));
+                optBC=optimizableVariable('BC',[1e-7,1e7],'Transform','log');
+                results=bayesopt(errFun,optBC,...
+                    'AcquisitionFunctionName','expected-improvement-plus','MaxObjectiveEvaluations',20);%,'Verbose',0,'PlotFcn',{});
+                
+                % Train cross-validated classifier
+                svmMdl=fitcsvm(trainData(featsIdx,:)',trainLbls','Cost',costMat,'KernelFunction','linear',...
+                    'BoxConstraint',results.XAtMinEstimatedObjective.BC);
 
-            % Lasso (or elastic net, depending on Alpha parameter)
-            [this.B,this.FitInfo] = lasso(this.feats',this.lbls','CV',5,'Alpha',.5);
-            lassoScore=this.feats'*this.B(:,this.FitInfo.Index1SE)+this.FitInfo.Intercept(this.FitInfo.Index1SE);
-            lblsEst=lassoScore>.5;
-%             [X,Y,T,AUC]=perfcurve(this.lbls,lassoScore,1);
+                % Recover predictions
+                lblsEst(C.test(currPart))=svmMdl.predict(testData(featsIdx,:)');
+            end
             
             % Compute balanced accuracy
             BAcc=BAccFun(this.lbls,lblsEst);
